@@ -1,3 +1,1 @@
-from .identity import Identity
-from .telemetry import Telemetry
-from .score import Score
+from app.core.entities.auth import User, OAuthProfile, AuthToken

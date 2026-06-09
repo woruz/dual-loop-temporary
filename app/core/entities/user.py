@@ -16,7 +16,7 @@ class User:
     id: int
     github_id: int
     github_username: str
-    email: Optional[str]
+    email: str
     github_url: str
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)

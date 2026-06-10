@@ -16,7 +16,12 @@ class PostgresAuthRepo(AuthRepo):
         logger.info(f"Database query: get_user_by_email for email='{email}'")
         try:
             row = (await self.db.execute(
-                text("SELECT * FROM users WHERE email = :email"),
+                text("""
+                    SELECT u.*, o.provider_user_id, o.username, o.avatar_url 
+                    FROM users u
+                    LEFT JOIN oauth_profiles o ON u.id = o.user_id
+                    WHERE u.email = :email
+                """),
                 {"email": email},
             )).mappings().first()
             
@@ -34,7 +39,12 @@ class PostgresAuthRepo(AuthRepo):
         logger.info(f"Database query: get_user_by_id for id='{user_id}'")
         try:
             row = (await self.db.execute(
-                text("SELECT * FROM users WHERE id = :id"),
+                text("""
+                    SELECT u.*, o.provider_user_id, o.username, o.avatar_url 
+                    FROM users u
+                    LEFT JOIN oauth_profiles o ON u.id = o.user_id
+                    WHERE u.id = :id
+                """),
                 {"id": str(user_id)},
             )).mappings().first()
             
@@ -133,6 +143,9 @@ class PostgresAuthRepo(AuthRepo):
             hashed_password=row["hashed_password"],
             is_verified=row["is_verified"],
             created_at=row["created_at"],
+            provider_user_id=row.get("provider_user_id"),
+            username=row.get("username"),
+            avatar_url=row.get("avatar_url"),
         )
 
     @staticmethod

@@ -26,5 +26,5 @@ class RegisterUser:
         )
         
         created_user = await self.repo.create_user(user)
-        logger.info(f"Execution complete: User successfully registered email='{email}' id='{created_user.id}'")
+        logger.info(f"Execution complete: User successfully registered with email='{email}'")
         return created_user

@@ -2,6 +2,10 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import text
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.server.routers.auth import router as auth_router
+from app.server.dependencies import engine
 
 # Configure logging format and level
 logging.basicConfig(
@@ -10,8 +14,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("app.server.main")
 
-from app.server.routers.auth import router as auth_router
-from app.server.dependencies import engine
+
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -19,7 +23,7 @@ async def lifespan(app: FastAPI):
     logger.info("Database tables initialization started.")
     try:
         async with engine.begin() as conn:
-            # Create users table (compatible with PostgreSQL and SQLite)
+            # Create users table (compatible with PostgreSQL)
             await conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS users (
                     id VARCHAR(36) PRIMARY KEY,
@@ -29,7 +33,7 @@ async def lifespan(app: FastAPI):
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """))
-            # Create oauth_profiles table (compatible with PostgreSQL and SQLite)
+            # Create oauth_profiles table (compatible with PostgreSQL)
             await conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS oauth_profiles (
                     id VARCHAR(36) PRIMARY KEY,
@@ -55,6 +59,22 @@ app = FastAPI(
     description="Hexagonal architecture implementation for user signup, signin, and GitHub OAuth.",
     version="1.0.0",
     lifespan=lifespan
+)
+
+origins = [
+    "https://93qrwwjq-5174.inc1.devtunnels.ms",
+    "http://localhost:3000",   
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Mount only the auth router

@@ -33,6 +33,13 @@ class User:
     created_at: datetime = field(default_factory=datetime.utcnow)
     # ↑ Automatically set to "right now" when the User is created.
 
+    provider_user_id: str | None = None
+    # ↑ GitHub's user ID if linked.
+    username: str | None = None
+    # ↑ GitHub handle if linked.
+    avatar_url: str | None = None
+    # ↑ GitHub avatar URL if linked.
+
 
 @dataclass
 class OAuthProfile:
@@ -52,8 +59,8 @@ class OAuthProfile:
 
     username: str | None = None     # e.g. "deepak-raj" — the @handle
     avatar_url: str | None = None   # profile picture URL from GitHub
-
     id: UUID = field(default_factory=uuid4)  # Our own internal ID
+
 
 
 @dataclass

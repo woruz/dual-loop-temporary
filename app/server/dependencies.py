@@ -4,11 +4,10 @@ import socket
 from uuid import UUID
 from urllib.parse import urlparse
 from dotenv import load_dotenv
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Cookie
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-# Load environment variables from .env file
 load_dotenv()
 
 from app.core.ports.auth_repo import AuthRepo
@@ -52,7 +51,8 @@ else:
         DATABASE_URL_ASYNC = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
     else:
         DATABASE_URL_ASYNC = DATABASE_URL
-    logger.info(f"Database: Configured PostgreSQL async database URL: {DATABASE_URL_ASYNC}")
+    # logger.info(f"Database: Configured PostgreSQL async database URL: {DATABASE_URL_ASYNC}")
+    logger.info(f"Database successfully Connected")
 
 try:
     engine = create_async_engine(DATABASE_URL_ASYNC, echo=False)
@@ -90,14 +90,22 @@ def get_token_generator() -> ITokenGenerator:
     return JWTGenerator()
 
 # ── Auth guard ────────────────────────────────────────────────────
-_bearer = HTTPBearer()
+_bearer = HTTPBearer(auto_error=False)
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+    access_token: str | None = Cookie(default=None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     repo: AuthRepo = Depends(get_auth_repo),
     token_generator: ITokenGenerator = Depends(get_token_generator),
 ):
-    token = credentials.credentials
+    token = access_token
+    if not token and credentials:
+        token = credentials.credentials
+        
+    if not token:
+        logger.warning("Authentication failed: Missing access token in Cookie and Authorization header.")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
+        
     payload = token_generator.verify_token(token)
     
     if not payload:

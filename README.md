@@ -49,4 +49,7 @@ for checking status > git status
 for fetch and push -> git remote -v 
 for addin it -> git add .
 for commiting it into the repo -> git commit -m "O auth depend"
-for push origin main -> git push --ser-upstream origin deature_Oauth 
+for push origin main -> git push --ser-upstream origin
+deature_Oauth 
+
+for testing i will use pytest tests/unit/

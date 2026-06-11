@@ -13,7 +13,7 @@ from app.core.entities import User, OAuthToken, GithubProfile
 from app.core.ports.auth_ports import UserRepositoryPort,GithubOAuthPort,TokenServicePort
 
 
-logger = logging.getlogger(__name__)
+logger = logging.getLogger(__name__)
 
 class GithubAuthUseCase:
      """
@@ -41,7 +41,7 @@ class GithubAuthUseCase:
           url = self.oauth_port.get_authorization_url(state)
           logger.info(f"Generated Github OAuth URL with state:")
           return url,state
-     async def handle_callback(self, code: str, state: str, expected_state: str) -> tuple[AuthTokens, User]:
+     async def handle_callback(self, code: str, state: str, expected_state: str) -> tuple[OAuthToken, User]:
         """
         Full OAuth callback flow. Called when GitHub redirects to /auth/github/callback.
  
@@ -51,7 +51,7 @@ class GithubAuthUseCase:
             expected_state: What we stored in the session when we started OAuth
  
         Returns:
-            (AuthTokens, User) — tokens for client, user for logging/response
+            (OAuthToken, User) — tokens for client, user for logging/response
  
         Raises:
             ValueError: on CSRF mismatch or GitHub API errors
@@ -86,9 +86,9 @@ class GithubAuthUseCase:
         ##5. Issues own JWTs
         access_token = self.token_service.create_access_token(self.user.id, user.username)
         refresh_token = self.token_service.create_refresh_token(user.id)
-        tokens = AuthTokens(access_token=access_token,refresh_token=refresh_token)
+        tokens = OAuthToken(access_token=access_token,refresh_token=refresh_token)
         return tokens,user
-     async def refresh_tokens(self, refresh_token: str) -> AuthTokens:
+     async def refresh_tokens(self, refresh_token: str) -> OAuthToken:
         """
         Issue new access token using a valid refresh token.
         Called when the 30-min access token expires.
@@ -104,7 +104,7 @@ class GithubAuthUseCase:
         new_refresh = self.token_service.create_refresh_token(user.id)
 
         
-        return AuthTokens(access_token=new_access, refresh_token=new_refresh)
+        return OAuthToken(access_token=new_access, refresh_token=new_refresh)
      
      async def get_current_user(self, access_token: str) -> User:
         """Validate JWT and return the user. Used by auth middleware."""

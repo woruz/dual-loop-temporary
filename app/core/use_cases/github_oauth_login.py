@@ -39,7 +39,6 @@ class GitHubOAuthLogin:
             user = await self.repo.create_user(User(
                 email=info.email,
                 hashed_password=None,   # OAuth-only, no password
-                is_verified=True,       # GitHub already verified the email
             ))
             logger.info(f"New user account created: id='{user.id}' email='{user.email}'")
         else:

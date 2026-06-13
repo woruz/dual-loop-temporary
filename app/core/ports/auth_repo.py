@@ -20,3 +20,6 @@ class AuthRepo(ABC):
 
     @abstractmethod
     async def create_oauth_profile(self, profile: OAuthProfile) -> OAuthProfile: ...
+
+    @abstractmethod
+    async def update_user(self, user: User) -> User: ...

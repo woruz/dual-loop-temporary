@@ -3,7 +3,7 @@ from typing import Dict, Any, Optional
 
 class ITokenGenerator(ABC):
     @abstractmethod
-    def generate_token(self, user_id: str, email: str) -> str:
+    def generate_token(self, user_id: str, email: str, is_verified_forjournal: bool = False) -> str:
         """
         Generate a token for a given user.
         """

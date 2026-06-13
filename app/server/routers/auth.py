@@ -1,7 +1,7 @@
 from fastapi import Response
 import secrets
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
 
@@ -15,12 +15,21 @@ from app.server.dependencies import (
 from app.core.use_cases.register_user import RegisterUser
 from app.core.use_cases.login_user import LoginUser
 from app.core.use_cases.github_oauth_login import GitHubOAuthLogin
+from app.core.use_cases.verify_journal import VerifyJournal
 
 logger =logging.getLogger("app.server.routers.auth")
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(tags=["auth"])
 
 class EmailPasswordBody(BaseModel):
     email: EmailStr
+    password: str
+
+class VerifyJournalBody(BaseModel):
+    full_name: str
+    goal: str
+    experience: str
+
+class SetPasswordBody(BaseModel):
     password: str
 
 # ── Email / Password ──────────────────────────────────────────────
@@ -29,34 +38,37 @@ class EmailPasswordBody(BaseModel):
 async def register(
     body: EmailPasswordBody,
     response: Response, # Inject FastAPI Response object
+    request: Request,
     repo=Depends(get_auth_repo),
     hasher=Depends(get_password_hasher),
     token_generator=Depends(get_token_generator),
 ):
-    logger.info(f"API Request: POST /auth/register: email='{body.email}' registeration requested")
+    logger.info(f"API Request: POST /register: email='{body.email}' registeration requested")
     try:
 
         user = await RegisterUser(repo, hasher).execute(body.email, body.password)
-        access_token = token_generator.generate_token(user.id, user.email)
+        access_token = token_generator.generate_token(user.id, user.email, is_verified_forjournal=user.is_verified_forjournal)
         
         # Set the HttpOnly Cookie
+        secure = request.url.scheme == "https"
+        samesite = "none" if secure else "lax"
         response.set_cookie(
             key="access_token",
             value=access_token,
             httponly=True,        # JavaScript cannot access it
-            secure=True,          # Only sent over HTTPS
-            samesite="lax",       # Protects against CSRF
+            secure=secure,
+            samesite=samesite,
             max_age=1440 * 60,    # 24 hours in seconds
             path="/",
         )
         
-        logger.info(f"API Success: POST /auth/register: email='{user.email}' registered")
-        return {"id": str(user.id), "email": user.email}
+        logger.info(f"API Success: POST /register: email='{user.email}' registered")
+        return {"message": "User registered successfully"}
     except ValueError as e:
-        logger.warning(f"API Failure: POST /auth/register error: {e}")
+        logger.warning(f"API Failure: POST /register error: {e}")
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
     except Exception as e:
-        logger.error(f"API Error: POST /auth/register unexpected error: {e}", exc_info=True)
+        logger.error(f"API Error: POST /register unexpected error: {e}", exc_info=True)
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "An unexpected error occurred.")
 
 
@@ -64,34 +76,36 @@ async def register(
 async def login(
     body: EmailPasswordBody,
     response: Response, # Inject FastAPI Response object
+    request: Request,
     repo=Depends(get_auth_repo),
     hasher=Depends(get_password_hasher),
     token_generator=Depends(get_token_generator),
 ):
-    logger.info(f"API Request: POST /auth/login: for email='{body.email}'")
+    logger.info(f"API Request: POST /login: for email='{body.email}'")
     try:
         user = await LoginUser(repo, hasher).execute(body.email, body.password)
-        access_token = token_generator.generate_token(user.id, user.email)
+        access_token = token_generator.generate_token(user.id, user.email, is_verified_forjournal=user.is_verified_forjournal)
         
         # Set the HttpOnly Cookie
+        secure = request.url.scheme == "https"
+        samesite = "none" if secure else "lax"
         response.set_cookie(
             key="access_token",
             value=access_token,
             httponly=True,        # JavaScript cannot access it
-            secure=True,          # Only sent over HTTPS
-            samesite="lax",       # Protects against CSRF
+            secure=secure,
+            samesite=samesite,
             max_age=1440 * 60,    # 24 hours in seconds
             path="/",
         )
         
-        logger.info(f"API Success: POST /auth/login logged in user email={user.email}")
-        # Return user profile info (Zustand will store this)
-        return {"id": str(user.id), "email": user.email}
+        logger.info(f"API Success: POST /login logged in user email={user.email}")
+        return {"message": "Logged in successfully"}
     except ValueError as e:
-        logger.warning(f"API Failure: POST /auth/login error: {e}")
+        logger.warning(f"API Failure: POST /login error: {e}")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(e))
     except Exception as e:
-        logger.error(f"API Error: POST /auth/login unexpected error: {e}", exc_info=True)
+        logger.error(f"API Error: POST /login unexpected error: {e}", exc_info=True)
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "An unexpected error occurred.")
 
 
@@ -106,47 +120,102 @@ async def logout(response: Response):
 # ── GitHub OAuth ──────────────────────────────────────────────────
 
 @router.get("/github")
-async def github_redirect(github=Depends(get_github_oauth)):
+async def github_redirect(
+    request: Request,
+    response: Response,
+    redirect_uri: str | None = None,
+    github=Depends(get_github_oauth),
+):
     """Step 1 — redirect browser to GitHub consent page."""
-    logger.info("API Request: GET /auth/github redirecting user to GitHub consent page")
+    logger.info("API Request: GET /github redirecting user to GitHub consent page")
+    
+    # Resolve redirect_uri
+    if not redirect_uri:
+        referer = request.headers.get("referer")
+        if referer:
+            redirect_uri = referer
+            
+    if not redirect_uri:
+        redirect_uri = "http://localhost:5173"
+        
+    logger.info(f"OAuth redirect destination resolved to: {redirect_uri}")
+    
     state = secrets.token_urlsafe(16)   # store in session/cookie if you need CSRF check
     url = github.get_authorization_url(state)
-    return RedirectResponse(url)
+    
+    res = RedirectResponse(url)
+    # Store redirect_uri in a cookie so callback knows where to redirect
+    res.set_cookie(
+        key="oauth_redirect",
+        value=redirect_uri,
+        httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="lax",
+        max_age=300,
+        path="/"
+    )
+    return res
 
 @router.get("/github/callback")
 async def github_callback(
     code: str,
-    response: Response, # 1. Inject Response object
+    request: Request,
     repo=Depends(get_auth_repo),
     github=Depends(get_github_oauth),
     token_generator=Depends(get_token_generator),
 ):
     """Step 2 — GitHub redirects back here with ?code=..."""
-    logger.info("API Request: GET /auth/github/callback callback received from GitHub")
+    logger.info("API Request: GET /github/callback callback received from GitHub")
     try:
         user = await GitHubOAuthLogin(repo, github).execute(code)
-        access_token = token_generator.generate_token(user.id, user.email)
+        access_token = token_generator.generate_token(user.id, user.email, is_verified_forjournal=user.is_verified_forjournal)
         
-        # 2. Set the HttpOnly Cookie
-        response.set_cookie(
+        # Read the redirect destination from cookie
+        redirect_uri = request.cookies.get("oauth_redirect")
+        if redirect_uri:
+            redirect_uri = redirect_uri.strip('"')
+        else:
+            redirect_uri = f"{request.url.scheme}://{request.url.netloc}/test"
+            
+        logger.info(f"API Success: GET /github/callback logged in user email='{user.email}' id='{user.id}'")
+        
+        logger.info(f"Redirecting user to: {redirect_uri}")
+        res = RedirectResponse(url=redirect_uri)
+        
+        # Set the HttpOnly Cookie
+        secure = request.url.scheme == "https"
+        samesite = "none" if secure else "lax"
+        res.set_cookie(
             key="access_token",
             value=access_token,
             httponly=True,
-            secure=True,
-            samesite="lax",
+            secure=secure,
+            samesite=samesite,
             max_age=1440 * 60,
             path="/",
         )
         
-        logger.info(f"API Success: GET /auth/github/callback logged in user email='{user.email}' id='{user.id}'")
-        # 3. Return user profile details instead of raw token in JSON
-        return {"id": str(user.id), "email": user.email}
+        # Clear the oauth_redirect cookie
+        res.delete_cookie(key="oauth_redirect", path="/")
+        return res
     except ValueError as e:
-        logger.warning(f"API Failure: GET /auth/github/callback error: {e}")
+        logger.warning(f"API Failure: GET /github/callback error: {e}")
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
     except Exception as e:
-        logger.error(f"API Error: GET /auth/github/callback unexpected error: {e}", exc_info=True)
+        logger.error(f"API Error: GET /github/callback unexpected error: {e}", exc_info=True)
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "An unexpected error occurred.")
+
+
+@router.get("/auth/github")
+async def auth_github_compat_redirect(request: Request):
+    query = f"?{request.query_params}" if request.query_params else ""
+    return RedirectResponse(url=f"/github{query}")
+
+
+@router.get("/auth/github/callback")
+async def auth_github_callback_compat_redirect(request: Request):
+    query = f"?{request.query_params}" if request.query_params else ""
+    return RedirectResponse(url=f"/github/callback{query}")
 
 
 # ── Profile ────────────────────────────────────────────────────────
@@ -154,13 +223,94 @@ async def github_callback(
 @router.get("/profile")
 async def profile(user=Depends(get_current_user)):
     """Retrieve details of the currently authenticated user."""
-    logger.info(f"API Request: GET /auth/profile for user email='{user.email}'")
+    logger.info(f"API Request: GET /profile for user email='{user.email}'")
     return {
-        "id": str(user.id),
         "provider_user_id": user.provider_user_id,
         "username": user.username,
         "email": user.email,
         "avatar_url": user.avatar_url,
-        "is_verified": user.is_verified,
-        "created_at": user.created_at.isoformat() if user.created_at else None
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "is_verified_forjournal": user.is_verified_forjournal,
+        "full_name": user.full_name,
+        "goal": user.goal,
+        "experience": user.experience,
+        "has_password": user.hashed_password is not None
     }
+
+@router.post("/verify-journal")
+async def verify_journal(
+    body: VerifyJournalBody,
+    response: Response,
+    request: Request,
+    user=Depends(get_current_user),
+    repo=Depends(get_auth_repo),
+    token_generator=Depends(get_token_generator),
+):
+    logger.info(f"API Request: POST /verify-journal for user id='{user.id}'")
+    try:
+        use_case = VerifyJournal(repo)
+        updated_user = await use_case.execute(
+            user_id=user.id,
+            full_name=body.full_name,
+            goal=body.goal,
+            experience=body.experience
+        )
+        
+        # Issue new token with is_verified_forjournal=True
+        access_token = token_generator.generate_token(
+            updated_user.id,
+            updated_user.email,
+            is_verified_forjournal=True
+        )
+        
+        # Set HttpOnly Cookie
+        secure = request.url.scheme == "https"
+        samesite = "none" if secure else "lax"
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            secure=secure,
+            samesite=samesite,
+            max_age=1440 * 60,
+            path="/"
+        )
+        
+        return {
+            "email": updated_user.email,
+            "full_name": updated_user.full_name,
+            "goal": updated_user.goal,
+            "experience": updated_user.experience,
+            "is_verified_forjournal": updated_user.is_verified_forjournal
+        }
+    except ValueError as e:
+        logger.warning(f"API Failure: POST /verify-journal error: {e}")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    except Exception as e:
+        logger.error(f"API Error: POST /verify-journal unexpected error: {e}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "An unexpected error occurred.")
+
+
+@router.post("/set-password")
+async def set_password(
+    body: SetPasswordBody,
+    user=Depends(get_current_user),
+    repo=Depends(get_auth_repo),
+    hasher=Depends(get_password_hasher),
+):
+    logger.info(f"API Request: POST /set-password for user email='{user.email}'")
+    try:
+        if user.hashed_password is not None:
+            logger.warning(f"API Failure: POST /set-password password is already set for user email='{user.email}'")
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Password is already set. Use change password instead.")
+        
+        hashed = hasher.hash(body.password)
+        user.hashed_password = hashed
+        await repo.update_user(user)
+        logger.info(f"API Success: POST /set-password password set successfully for email='{user.email}'")
+        return {"message": "Password set successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"API Error: POST /set-password unexpected error: {e}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "An unexpected error occurred.")

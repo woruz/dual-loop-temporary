@@ -15,11 +15,12 @@ class JWTGenerator(ITokenGenerator):
         self.expire_minutes = 1440  # 24 hours
         logger.debug(f"JWTGenerator initialized with algorithm {self.algorithm}")
 
-    def generate_token(self, user_id: Any, email: str) -> str:
+    def generate_token(self, user_id: Any, email: str, is_verified_forjournal: bool = False) -> str:
         logger.info(f"Generating access token for user: {email} (id: {user_id})")
         payload = {
             "sub": str(user_id),
             "email": email,
+            "is_verified_forjournal": is_verified_forjournal,
             "exp": datetime.utcnow() + timedelta(minutes=self.expire_minutes),
             "iat": datetime.utcnow()
         }

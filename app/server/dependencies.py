@@ -19,6 +19,8 @@ from app.infrastructure.adapters.postgres_auth_repo import PostgresAuthRepo
 from app.infrastructure.adapters.github_oauth import GitHubOAuth
 from app.infrastructure.adapters.bcrypt_hasher import BcryptHasher
 from app.infrastructure.adapters.jwt_generator import JWTGenerator
+from app.infrastructure.adapters.postgres_webhook_repo import PostgresWebhookRepo
+from app.core.use_cases.process_webhook import ProcessWebhookUseCase
 
 logger = logging.getLogger("app.server.dependencies")
 
@@ -51,7 +53,6 @@ else:
         DATABASE_URL_ASYNC = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
     else:
         DATABASE_URL_ASYNC = DATABASE_URL
-    # logger.info(f"Database: Configured PostgreSQL async database URL: {DATABASE_URL_ASYNC}")
     logger.info(f"Database successfully Connected")
 
 try:
@@ -89,6 +90,15 @@ def get_password_hasher() -> IPasswordHasher:
 def get_token_generator() -> ITokenGenerator:
     return JWTGenerator()
 
+# ── Webhook dependencies ──────────────────────────────────────────
+async def get_webhook_repo(db: AsyncSession = Depends(get_db)) -> PostgresWebhookRepo:
+    return PostgresWebhookRepo(db)
+
+def get_process_webhook_use_case(
+    repo: PostgresWebhookRepo = Depends(get_webhook_repo)
+) -> ProcessWebhookUseCase:
+    return ProcessWebhookUseCase(repo)
+
 # ── Auth guard ────────────────────────────────────────────────────
 _bearer = HTTPBearer(auto_error=False)
 
@@ -99,15 +109,18 @@ async def get_current_user(
     token_generator: ITokenGenerator = Depends(get_token_generator),
 ):
     token = access_token
+    print(f"Access token: {access_token}")  # Debug log for cookie token
     if not token and credentials:
         token = credentials.credentials
         
+    print(f"Access token from Cookie: {credentials}")  # Debug log for cookie token
+    print("I am here")
     if not token:
         logger.warning("Authentication failed: Missing access token in Cookie and Authorization header.")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
         
     payload = token_generator.verify_token(token)
-    
+    print(f"Token payload: {payload}")  # Debug log to inspect token contents
     if not payload:
         logger.warning("Authentication failed: Invalid or expired access token.")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
@@ -128,5 +141,9 @@ async def get_current_user(
         logger.warning(f"Authentication failed: User id '{user_id}' not found in database.")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
         
+    # Bind verification status from token payload if present, bypassing further DB queries
+    if payload.get("is_verified_forjournal"):
+        user.is_verified_forjournal = True
+
     logger.debug(f"User '{user.email}' authenticated successfully.")
     return user

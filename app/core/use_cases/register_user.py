@@ -22,7 +22,6 @@ class RegisterUser:
         user = User(
             email=email,
             hashed_password=hashed_password,
-            is_verified=False,
         )
         
         created_user = await self.repo.create_user(user)

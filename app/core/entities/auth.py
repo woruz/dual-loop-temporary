@@ -25,10 +25,6 @@ class User:
     #   They never set a password, so we store nothing.
     #   str means they registered with email+password (bcrypt hash).
 
-    is_verified: bool = False
-    # ↑ Did they confirm their email?
-    #   For GitHub users this is True immediately (GitHub verified it).
-    #   For email users it starts False until they click a verify link.
 
     created_at: datetime = field(default_factory=datetime.utcnow)
     # ↑ Automatically set to "right now" when the User is created.
@@ -39,6 +35,12 @@ class User:
     # ↑ GitHub handle if linked.
     avatar_url: str | None = None
     # ↑ GitHub avatar URL if linked.
+
+    # Journal verification fields
+    full_name: str | None = None
+    goal: str | None = None
+    experience: str | None = None
+    is_verified_forjournal: bool = False
 
 
 @dataclass

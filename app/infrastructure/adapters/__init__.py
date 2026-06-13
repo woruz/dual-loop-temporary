@@ -2,3 +2,4 @@ from app.infrastructure.adapters.bcrypt_hasher import BcryptHasher
 from app.infrastructure.adapters.jwt_generator import JWTGenerator
 from app.infrastructure.adapters.postgres_auth_repo import PostgresAuthRepo
 from app.infrastructure.adapters.github_oauth import GitHubOAuth
+from app.infrastructure.adapters.postgres_webhook_repo import PostgresWebhookRepo

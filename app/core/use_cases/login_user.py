@@ -22,7 +22,7 @@ class LoginUser:
             
         if not user.hashed_password:
             logger.warning(f"Login failed: User '{email}' exists but has no password (registered via OAuth only)")
-            raise ValueError("Invalid credentials")
+            raise ValueError("This account was created via GitHub. Please log in using 'Continue with GitHub' or set a password in your profile.")
 
         if not self.hasher.verify(password, user.hashed_password):
             logger.warning(f"Login failed: Incorrect password for email='{email}'")

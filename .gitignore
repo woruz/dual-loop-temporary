@@ -9,3 +9,6 @@ wheels/
 # Virtual environments
 .venv
 .env
+test_frontend.html
+api_contract.md
+.gitignore

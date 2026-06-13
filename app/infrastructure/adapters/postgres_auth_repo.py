@@ -63,15 +63,18 @@ class PostgresAuthRepo(AuthRepo):
         try:
             await self.db.execute(
                 text("""
-                    INSERT INTO users (id, email, hashed_password, is_verified, created_at)
-                    VALUES (:id, :email, :hashed_password, :is_verified, :created_at)
+                    INSERT INTO users (id, email, hashed_password, created_at, full_name, goal, experience, is_verified_forjournal)
+                    VALUES (:id, :email, :hashed_password, :created_at, :full_name, :goal, :experience, :is_verified_forjournal)
                 """),
                 {
                     "id": str(user.id),
                     "email": user.email,
                     "hashed_password": user.hashed_password,
-                    "is_verified": user.is_verified,
                     "created_at": user.created_at,
+                    "full_name": user.full_name,
+                    "goal": user.goal,
+                    "experience": user.experience,
+                    "is_verified_forjournal": user.is_verified_forjournal,
                 },
             )
             await self.db.commit()
@@ -141,12 +144,45 @@ class PostgresAuthRepo(AuthRepo):
             id=user_id,
             email=row["email"],
             hashed_password=row["hashed_password"],
-            is_verified=row["is_verified"],
             created_at=row["created_at"],
             provider_user_id=row.get("provider_user_id"),
             username=row.get("username"),
             avatar_url=row.get("avatar_url"),
+            full_name=row.get("full_name"),
+            goal=row.get("goal"),
+            experience=row.get("experience"),
+            is_verified_forjournal=bool(row.get("is_verified_forjournal", False)),
         )
+
+    async def update_user(self, user: User) -> User:
+        logger.info(f"Database update: update_user with id='{user.id}'")
+        try:
+            await self.db.execute(
+                text("""
+                    UPDATE users 
+                    SET full_name = :full_name,
+                        goal = :goal,
+                        experience = :experience,
+                        is_verified_forjournal = :is_verified_forjournal,
+                        hashed_password = :hashed_password
+                    WHERE id = :id
+                """),
+                {
+                    "id": str(user.id),
+                    "full_name": user.full_name,
+                    "goal": user.goal,
+                    "experience": user.experience,
+                    "is_verified_forjournal": user.is_verified_forjournal,
+                    "hashed_password": user.hashed_password,
+                },
+            )
+            await self.db.commit()
+            logger.debug(f"User successfully updated with id='{user.id}'")
+            return user
+        except Exception as e:
+            logger.error(f"Error updating user with id '{user.id}': {e}", exc_info=True)
+            await self.db.rollback()
+            raise
 
     @staticmethod
     def _row_to_profile(row) -> OAuthProfile:

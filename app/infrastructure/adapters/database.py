@@ -13,7 +13,7 @@ logger = logging.getLogger("app.infrastructure.adapters.database")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 try:
     if DATABASE_URL.startswith("postgresql"):
-        logger.info(f"[Database] Connection URL detected for PostgreSQL: {DATABASE_URL}")
+        logger.info(f"[Database] Connection URL detected for PostgreSQL")
         engine = create_engine(DATABASE_URL)
         with engine.connect() as conn:
             logger.info("[Database] Successfully connected to PostgreSQL instance.")

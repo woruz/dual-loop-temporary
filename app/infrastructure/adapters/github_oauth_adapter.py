@@ -11,8 +11,10 @@ import httpx
 import logging
 import os
 from urllib.parse import urlencode
+
 from app.core.entities.user import GithubProfile
 from app.core.ports.auth_ports import GithubOAuthPort
+from app.server.auth_config import get_github_redirect_uri
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +35,16 @@ class HttpxGithubOAuthAdapter(GithubOAuthPort):
     def __init__(self):
         self.client_id = os.getenv("GITHUB_CLIENT_ID", "")
         self.client_secret = os.getenv("GITHUB_CLIENT_SECRET", "")
- 
+
         if not self.client_id or not self.client_secret:
             raise RuntimeError(
                 "GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be set"
             )
- 
+
+    @property
+    def redirect_uri(self) -> str:
+        return get_github_redirect_uri()
+
     def get_authorization_url(self, state: str) -> str:
         """
         Build the URL to redirect the user to GitHub for login.
@@ -48,16 +54,25 @@ class HttpxGithubOAuthAdapter(GithubOAuthPort):
             "client_id": self.client_id,
             "scope": GITHUB_SCOPES,
             "state": state,
-            # redirect_uri is optional if you set one in GitHub OAuth App settings
-            # "redirect_uri": os.getenv("GITHUB_REDIRECT_URI"),
+            "redirect_uri": self.redirect_uri,
         }
-        return f"{GITHUB_AUTHORIZE_URL}?{urlencode(params)}"
- 
+        url = f"{GITHUB_AUTHORIZE_URL}?{urlencode(params)}"
+        logger.info(
+            "GitHub OAuth authorize request | redirect_uri=%s | full_url=%s",
+            self.redirect_uri,
+            url,
+        )
+        return url
+
     async def exchange_code_for_token(self, code: str) -> str:
         """
         POST to GitHub to swap the one-time `code` for an access token.
         The code expires in 10 minutes and can only be used once.
         """
+        logger.info(
+            "GitHub OAuth token exchange | redirect_uri=%s",
+            self.redirect_uri,
+        )
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 GITHUB_TOKEN_URL,
@@ -66,6 +81,7 @@ class HttpxGithubOAuthAdapter(GithubOAuthPort):
                     "client_id": self.client_id,
                     "client_secret": self.client_secret,
                     "code": code,
+                    "redirect_uri": self.redirect_uri,
                 },
             )
             response.raise_for_status()
@@ -92,21 +108,18 @@ class HttpxGithubOAuthAdapter(GithubOAuthPort):
             "X-GitHub-Api-Version": "2022-11-28",
         }
         async with httpx.AsyncClient(timeout=10.0) as client:
-            ##primary profile request 
-            user_resp =await client.get(f"{GITHUB_API_URL}/user", headers=headers)
+            user_resp = await client.get(f"{GITHUB_API_URL}/user", headers=headers)
             user_resp.raise_for_status()
             user_data = user_resp.json()
-            # Try to get primary verified email
-            # Some users set email to private — this endpoint bypasses that
             email = user_data.get("email")
-        if not email:
+
+            if not email:
                 try:
                     emails_resp = await client.get(
                         f"{GITHUB_API_URL}/user/emails", headers=headers
                     )
                     if emails_resp.status_code == 200:
                         emails = emails_resp.json()
-                        # Find primary + verified email
                         primary = next(
                             (e for e in emails if e.get("primary") and e.get("verified")),
                             None,
@@ -116,12 +129,11 @@ class HttpxGithubOAuthAdapter(GithubOAuthPort):
                 except Exception:
                     logger.warning("Could not fetch user emails from GitHub")
 
-                return GithubProfile(
+        return GithubProfile(
             github_id=user_data["id"],
             login=user_data["login"],
             email=email,
             name=user_data.get("name"),
-            public_repos=user_data.get("public_repos",0)
-    
+            public_repos=user_data.get("public_repos", 0),
         )
  

@@ -10,7 +10,7 @@ WHY TWO TOKENS:
   Refresh token (7 days): Long-lived, only sent to /auth/refresh endpoint.
                            Used to get new access tokens without re-login.
 """
-from datetime import datetime , timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import os
 import logging
@@ -29,10 +29,12 @@ class JWTTokenService(TokenServicePort):
         self.algorithm = os.getenv("ALGORITHM", "HS256")
         self.access_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
         self.refresh_expire_days = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
- 
+
         if not self.secret_key or self.secret_key == "your-secret-key-change-in-production":
             if os.getenv("ENVIRONMENT") == "production":
                 raise RuntimeError("SECRET_KEY must be set to a secure value in production!")
+            if not self.secret_key:
+                self.secret_key = "dev-insecure-key-change-me"
             logger.warning("Using insecure SECRET_KEY — change for production!")
     
      def _create_token(
@@ -44,15 +46,15 @@ class JWTTokenService(TokenServicePort):
 
 
     )-> str:
-         now = datetime.utcnow()
+         now = datetime.now(timezone.utc)
          payload = {
-             "sub":subject,
-             "purpose":purpose,
-             "iat":now,
-             "exp":now+expire_delta,
-             **(extra_claims or {})
+             "sub": subject,
+             "purpose": purpose,
+             "iat": int(now.timestamp()),
+             "exp": int((now + expire_delta).timestamp()),
+             **(extra_claims or {}),
          }
-         return jwt.encode(payload,self.secret_key,alogrithm=self.algorithm)
+         return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
      def _verify_token(self,token:str,expected_purpose:str)-> dict:
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
@@ -70,7 +72,7 @@ class JWTTokenService(TokenServicePort):
         return self._create_token(
             subject=str(user_id),
             purpose=ACCESS_TOKEN_PURPOSE,
-            expires_delta=timedelta(minutes=self.access_expire_minutes),
+            expire_delta=timedelta(minutes=self.access_expire_minutes),
             extra_claims={"username": username},
         )
      def create_refresh_token(self, user_id:int) -> str:

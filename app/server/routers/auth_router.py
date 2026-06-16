@@ -25,6 +25,7 @@ from typing import Optional
 from app.core.use_cases.auth_use_cases import GithubAuthUseCase
 from app.core.entities.user import User
 from app.server.dependencies import get_auth_use_case, get_current_active_user
+from app.server.auth_config import get_github_redirect_uri
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth",tags=["Authentication"])
@@ -55,11 +56,53 @@ class RefreshRequest(BaseModel):
     refresh_token:str
 
 
-# ─── Endpoints ────────────────────────────────────────────────────────────────
-@router.get("/github/login", summary="Initiate GitHub OAuth flow")
-async def github_login(
-    auth_use_case:GithubAuthUseCase = Depends(get_auth_use_case),
+class OAuthLoginUrlResponse(BaseModel):
+    authorization_url: str
+    state: str
+    callback_url: str
+    instructions: str = (
+        "Open authorization_url in a browser tab (not Swagger). "
+        "After GitHub login, copy access_token from the redirect URL "
+        "and use Swagger Authorize with: Bearer <access_token>"
+    )
 
+
+# ─── Endpoints ────────────────────────────────────────────────────────────────
+@router.get(
+    "/github/login/url",
+    response_model=OAuthLoginUrlResponse,
+    summary="Get GitHub OAuth URL (Swagger-friendly)",
+)
+async def github_login_url(
+    auth_use_case: GithubAuthUseCase = Depends(get_auth_use_case),
+):
+    """
+    Returns the GitHub authorization URL as JSON.
+
+    Use this from Swagger instead of /auth/github/login — Swagger cannot
+    follow 302 redirects to external sites like github.com.
+    """
+    redirect_uri = get_github_redirect_uri()
+    url, state = auth_use_case.get_ouauth_url()
+    logger.info(
+        "OAuth login URL generated | redirect_uri=%s | callback_url=%s",
+        redirect_uri,
+        redirect_uri,
+    )
+    return OAuthLoginUrlResponse(
+        authorization_url=url,
+        state=state,
+        callback_url=redirect_uri,
+    )
+
+
+@router.get(
+    "/github/login",
+    summary="Initiate GitHub OAuth flow (browser redirect)",
+    responses={302: {"description": "Redirect to GitHub — open in browser, not Swagger"}},
+)
+async def github_login(
+    auth_use_case: GithubAuthUseCase = Depends(get_auth_use_case),
 ):
     """    
     Step 1: Redirect user to GitHub for authentication.
@@ -70,17 +113,18 @@ async def github_login(
       → Redirect to GitHub with client_id + state
       → GitHub shows "Authorize" page
     """
-    url,state = auth_use_case.get_ouauth_url()
+    url, state = auth_use_case.get_ouauth_url()
+    logger.info("Redirecting browser to GitHub OAuth: %s", url)
     response = RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
 
-     # Store CSRF state in HttpOnly cookie (JS cannot read this)
     response.set_cookie(
         key="oauth_state",
         value=state,
         httponly=True,
-        secure=IS_PRODUCTION,      # HTTPS only in production
-        samesite="lax",            # Allows the redirect back from GitHub
-        max_age=600,               # 10 minutes — OAuth flow should be faster
+        secure=IS_PRODUCTION,
+        samesite="lax",
+        max_age=600,
+        path="/auth",
     )
 
     logger.info("Redirecting user to Github Oauth")
@@ -88,12 +132,13 @@ async def github_login(
 
 @router.get("/github/callback", summary="GitHub OAuth callback")
 async def github_callback(
-    code: str,
-    state: str,
     request: Request,
-    response: Response,
-     oauth_state: Optional[str] = Cookie(default=None),
-    auth_use_case: GithubAuthUseCase = Depends(get_auth_use_case), 
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+    oauth_state: Optional[str] = Cookie(default=None),
+    auth_use_case: GithubAuthUseCase = Depends(get_auth_use_case),
 ):
     """
     Step 2: GitHub redirects here after user approves access.
@@ -104,6 +149,22 @@ async def github_callback(
     On success: Redirects to frontend with tokens in URL fragment (#)
     On failure: Redirects to frontend with error
     """
+
+    logger.info("OAuth callback received | redirect_uri=%s", get_github_redirect_uri())
+
+    if error:
+        logger.error("GitHub OAuth error: %s — %s", error, error_description)
+        return RedirectResponse(
+            url=f"{FRONTEND_URL}/auth/error?error={error}",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    if not code or not state:
+        logger.warning("OAuth callback missing code or state")
+        return RedirectResponse(
+            url=f"{FRONTEND_URL}/auth/error?error=missing_code",
+            status_code=status.HTTP_302_FOUND,
+        )
 
     ##CSRF Validation
     if not oauth_state:
@@ -135,9 +196,9 @@ async def github_callback(
         ),
         status_code=status.HTTP_302_FOUND,
     )
-    response.delete_cookie("oauth_state")
+    response.delete_cookie("oauth_state", path="/auth")
  
-    logger.info(f"OAuth callback successful for user: {user.username}")
+    logger.info(f"OAuth callback successful for user: {user.github_username}")
     return response
 
 @router.post("/github/callback/json", response_model=TokenResponse, summary="GitHub OAuth (JSON API)")
@@ -154,7 +215,7 @@ async def github_callback_json(
     Usage: POST /auth/github/callback/json?code=xxx&state=yyy&expected_state=yyy
     """
     try:
-        tokens = await auth_use_case.handle_callback(
+        tokens, _user = await auth_use_case.handle_callback(
             code=code,
             state=state,
             expected_state=expected_state,
@@ -208,8 +269,8 @@ async def get_me(
     """
     return UserResponse(
         id=current_user.id,
-        username=current_user.username,
-        name=current_user.name,
+        github_id=current_user.github_id,
+        github_username=current_user.github_username,
         email=current_user.email,
         github_url=current_user.github_url,
     )

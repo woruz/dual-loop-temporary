@@ -18,6 +18,8 @@ class User:
     github_username: str
     email: str
     github_url: str
+    is_active: bool = True
+    name: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
 

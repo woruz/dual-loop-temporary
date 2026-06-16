@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.server.routers.auth import router as auth_router
 from app.server.routers.webhook import router as webhook_router
+from app.server.routers.journal import router as journal_router
 from app.server.dependencies import engine
 
 # Configure logging format and level
@@ -92,6 +93,34 @@ async def lifespan(app: FastAPI):
                     timestamp TIMESTAMP NOT NULL
                 )
             """))
+            # Create journals table
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS journals (
+                    id VARCHAR(36) PRIMARY KEY,
+                    user_id VARCHAR(36) REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+                    study_hours FLOAT NOT NULL,
+                    today_work TEXT,
+                    learning_notes TEXT,
+                    challenges TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            # Create analyses table
+            await conn.execute(text("DROP TABLE IF EXISTS analyses"))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS analyses (
+                    id VARCHAR(36) PRIMARY KEY,
+                    journal_id VARCHAR(36) REFERENCES journals(id) ON DELETE CASCADE NOT NULL,
+                    productivity_score FLOAT,
+                    sentiment_score FLOAT,
+                    goal_alignment_score FLOAT,
+                    risk_level VARCHAR(50),
+                    missing_goal TEXT,
+                    match_goal TEXT,
+                    recommendation TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
         logger.info("Database tables initialized successfully.")
     except Exception as e:
         logger.critical(f"Database initialization failed: {e}", exc_info=True)
@@ -132,6 +161,7 @@ app.add_middleware(
 # Mount the routers
 app.include_router(auth_router)
 app.include_router(webhook_router)
+app.include_router(journal_router)
 
 @app.get("/test")
 async def serve_test_page():

@@ -147,3 +147,20 @@ async def get_current_user(
 
     logger.debug(f"User '{user.email}' authenticated successfully.")
     return user
+
+# ── Journal and Analysis Dependencies ──────────────────────────────
+from app.core.ports.journal_repo import JournalRepositoryPort
+from app.core.ports.analysis_repo import AnalysisRepositoryPort
+from app.core.ports.journal_llm import JournalLLMPort
+from app.infrastructure.adapters.postgres_journal_repo import PostgresJournalRepo
+from app.infrastructure.adapters.postgres_analysis_repo import PostgresAnalysisRepo
+from app.infrastructure.adapters.groq_journal_llm_adapter import GroqJournalLLMAdapter
+
+async def get_journal_repo(db: AsyncSession = Depends(get_db)) -> JournalRepositoryPort:
+    return PostgresJournalRepo(db)
+
+async def get_analysis_repo(db: AsyncSession = Depends(get_db)) -> AnalysisRepositoryPort:
+    return PostgresAnalysisRepo(db)
+
+def get_journal_llm_adapter() -> JournalLLMPort:
+    return GroqJournalLLMAdapter()
